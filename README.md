@@ -1,14 +1,16 @@
 # ImportMap
 
-Implementation of [import maps](https://github.com/WICG/import-maps).
+Implementation of
+[import maps](https://html.spec.whatwg.org/multipage/webappapis.html#import-maps).
 
 ## Example
 
 ```ts
 import {
+  type ImportMap,
   resolveImportMap,
   resolveModuleSpecifier,
-} from "https://deno.land/x/importmap/mod.ts";
+} from "./mod.ts";
 
 const importMap: ImportMap = {
   imports: {

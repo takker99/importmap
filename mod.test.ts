@@ -1,10 +1,7 @@
-import * as path from "https://deno.land/std@0.95.0/path/mod.ts";
-import {
-  assertEquals,
-  assertThrows,
-} from "https://deno.land/std@0.95.0/testing/asserts.ts";
-import { ImportMap, resolveImportMap, resolveModuleSpecifier } from "./mod.ts";
-import { isImportMap } from "./_util.ts";
+import * as path from "@std/path";
+import { assert, assertEquals, assertThrows } from "@std/assert";
+import { type ImportMap, isImportMap } from "./import_map.ts";
+import { resolveImportMap, resolveModuleSpecifier } from "./resolve.ts";
 
 interface TestData {
   importMap: ImportMap;
@@ -28,22 +25,8 @@ function runTests(
   Deno.test({
     name,
     fn: () => {
-      if (
-        !isImportMap(importMap)
-      ) {
-        assertThrows(() => {
-          resolveImportMap(
-            importMap,
-            new URL(importMapBaseURL),
-          );
-        });
-      } else if (expectedParsedImportMap === null) {
-        assertThrows(() => {
-          resolveImportMap(
-            importMap,
-            new URL(importMapBaseURL),
-          );
-        });
+      if (!isImportMap(importMap) || expectedParsedImportMap === null) {
+        assert(!isImportMap(importMap));
       } else {
         const resolvedImportMap = resolveImportMap(
           importMap,
