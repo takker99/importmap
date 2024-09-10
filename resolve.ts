@@ -13,37 +13,54 @@ import type { ImportMap, ModuleSpecifierMap, Scopes } from "./import_map.ts";
 const sortAndNormalizeSpecifierMap = (
   originalMap: ModuleSpecifierMap,
   baseURL: URL,
-): ModuleSpecifierMap =>
-  sortObject(mapObject(
+): Ok<ModuleSpecifierMap> => {
+  const warnings: Warning[] = [];
+  const specifierMap = sortObject(mapObject(
     originalMap,
     (value, specifierKey) => {
-      const normalizedSpecifierKey = normalizeSpecifierKey(
+      const res = normalizeSpecifierKey(
         specifierKey,
         baseURL,
       );
-      if (!isNotNull(normalizedSpecifierKey)) return;
+      const normalizedSpecifierKey = unwrapOk(res);
+      if (!isNotNull(normalizedSpecifierKey)) {
+        warnings.push(...warns(res));
+        return;
+      }
 
       const nullPair = [normalizedSpecifierKey, null] as const;
       if (!isNotNull(value)) {
-        console.warn(`addresses need to be strings.`);
+        warnings.push({
+          name: "addresses need to be strings.",
+          key: specifierKey,
+        });
         return nullPair;
       }
       const addressURL = resolveUrlLikeModuleSpecifier(value, baseURL);
       if (!isNotNull(addressURL)) {
-        console.warn(`the address was invalid.`);
+        warnings.push({
+          name: "the address was invalid.",
+          key: specifierKey,
+          value,
+        });
         return nullPair;
       }
       if (
         isEndsSlash(specifierKey) && !isEndsSlash(serializeURL(addressURL))
       ) {
-        console.warn(
-          `the address was invalid since it was not a URL that started with the base URL.`,
-        );
+        warnings.push({
+          name:
+            "the address was invalid since it was not a URL that started with the base URL.",
+          key: specifierKey,
+          value: `${addressURL}`,
+        });
         return nullPair;
       }
       return [normalizedSpecifierKey, serializeURL(addressURL)];
     },
   ));
+  return createOk(specifierMap, warnings);
+};
 
 /** https://url.spec.whatwg.org/#concept-url-serializer */
 const serializeURL = <T extends URL | null>(
@@ -55,40 +72,46 @@ const serializeURL = <T extends URL | null>(
 const sortAndNormalizeScopes = (
   originalMap: Scopes,
   baseURL: URL,
-): Scopes =>
-  sortObject(
+): Ok<Scopes> => {
+  const warnings: Warning[] = [];
+  const scopes = sortObject(
     mapObject(originalMap, (potentialSpecifierMap, scopePrefix) => {
       let scopePrefixURL;
       try {
         scopePrefixURL = new URL(scopePrefix, baseURL);
       } catch {
-        console.warn(`the scope prefix URL was not parseable.`);
+        warnings.push({
+          name: "scope prefix URL was not parseable.",
+          key: scopePrefix,
+        });
         return;
       }
+      const res = sortAndNormalizeSpecifierMap(
+        potentialSpecifierMap,
+        baseURL,
+      );
+      warnings.push(...warns(res));
       return [
         serializeURL(scopePrefixURL),
-        sortObject(sortAndNormalizeSpecifierMap(
-          potentialSpecifierMap,
-          baseURL,
-        )),
+        sortObject(unwrapOk(res)),
       ];
     }),
   );
+  return createOk(scopes, warnings);
+};
 
 /** https://html.spec.whatwg.org/multipage/webappapis.html#normalizing-a-specifier-key */
 const normalizeSpecifierKey = (
   specifierKey: string,
   baseURL: URL,
-): string | null => {
+): Ok<string | null> => {
   if (!specifierKey.length) {
-    console.warn("specifier key cannot be an empty string.");
-    return null;
+    return createOk(null, [{
+      name: "specifier key cannot be an empty string.",
+    }]);
   }
   const url = resolveUrlLikeModuleSpecifier(specifierKey, baseURL);
-  if (isNotNull(url)) {
-    return serializeURL(url);
-  }
-  return specifierKey;
+  return createOk(isNotNull(url) ? serializeURL(url) : specifierKey);
 };
 /** https://html.spec.whatwg.org/multipage/webappapis.html#resolving-a-url-like-module-specifier */
 const resolveUrlLikeModuleSpecifier = (
@@ -172,6 +195,148 @@ const resolveImportsMatch = (
 };
 
 /**
+ * The warning that occurred during the resolution of the import map.
+ */
+export type Warning =
+  | NotStringAddress
+  | InvalidAddress
+  | NotStartsWithBaseURL
+  | InvalidScopePrefix
+  | EmptySpecifierKey;
+/**
+ * The warning that occurred during the resolution of the import map.
+ */
+export interface NotStringAddress {
+  /**
+   * The value of the warning.
+   */
+  name: "addresses need to be strings.";
+  /**
+   * The key of the warning.
+   */
+  key: string;
+}
+
+/**
+ * The warning that occurred during the resolution of the import map.
+ */
+export interface InvalidAddress {
+  /**
+   * The value of the warning.
+   */
+  name: "the address was invalid.";
+  /**
+   * The key of the warning.
+   */
+  key: string;
+  /**
+   * The value of the warning.
+   */
+  value: string;
+}
+
+/**
+ * The warning that occurred during the resolution of the import map.
+ */
+export interface NotStartsWithBaseURL {
+  /**
+   * The value of the warning.
+   */
+  name:
+    "the address was invalid since it was not a URL that started with the base URL.";
+  /**
+   * The key of the warning.
+   */
+  key: string;
+  /**
+   * The value of the warning.
+   */
+  value: string;
+}
+/**
+ * The warning that occurred during the resolution of the import map.
+ */
+export interface InvalidScopePrefix {
+  /**
+   * The value of the warning.
+   */
+  name: "scope prefix URL was not parseable.";
+  /**
+   * The key of the warning.
+   */
+  key: string;
+}
+/**
+ * The warning that occurred during the resolution of the import map.
+ */
+export interface EmptySpecifierKey {
+  /**
+   * The value of the warning.
+   */
+  name: "specifier key cannot be an empty string.";
+}
+
+/**
+ * The error that occurred during the resolution of the import map.
+ */
+export interface KeyError {
+  /**
+   * The name of the error.
+   */
+  name: "KeyError";
+  /**
+   * The message of the error.
+   */
+  message: string;
+}
+/**
+ * The error that occurred during the resolution of the import map.
+ */
+export interface Ok<T> {
+  /**
+   *  Whether the result is ok.
+   */
+  ok: true;
+  /**
+   * The value of the result.
+   */
+  value: T;
+  /**
+   * The warnings that occurred during the resolution of the import map.
+   */
+  warnings?: Warning[];
+}
+/**
+ * The error that occurred during the resolution of the import map.
+ */
+export interface Err<E> {
+  /**
+   * Whether the result is ok.
+   */
+  ok: false;
+  /**
+   * The error of the result.
+   */
+  error: E;
+  /**
+   * The warnings that occurred during the resolution of the import map.
+   */
+  warnings?: Warning[];
+}
+/**
+ * The result of the resolution of the import map.
+ */
+export type Result<T, E> = Ok<T> | Err<E>;
+
+const createOk = <T>(value: T, warnings?: Warning[]): Ok<T> => ({
+  ok: true,
+  value,
+  warnings,
+});
+const unwrapOk = <T>(result: Ok<T>): T => result.value;
+const warns = <T, E>(result: Result<T, E>): Warning[] => result.warnings ?? [];
+
+/**
  * Resolves the import map by sorting and normalizing the imports and scopes.
  *
  * https://wicg.github.io/import-maps/#parsing
@@ -185,21 +350,19 @@ export const resolveImportMap = (
   importMap: ImportMap,
   baseURL: URL,
 ): ImportMap => {
-  const { imports, scopes } = importMap;
+  const imports = sortAndNormalizeSpecifierMap(
+    importMap.imports ?? {},
+    baseURL,
+  );
+  const scopes = sortAndNormalizeScopes(importMap.scopes ?? {}, baseURL);
+
+  for (const warning of [...warns(imports), ...warns(scopes)]) {
+    console.warn(warning);
+  }
 
   return {
-    imports: imports
-      ? sortAndNormalizeSpecifierMap(
-        imports,
-        baseURL,
-      )
-      : {},
-    scopes: scopes
-      ? sortAndNormalizeScopes(
-        scopes,
-        baseURL,
-      )
-      : {},
+    imports: unwrapOk(imports),
+    scopes: unwrapOk(scopes),
   };
 };
 
